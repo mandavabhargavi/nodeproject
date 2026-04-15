@@ -2,136 +2,193 @@
 
 > Forked and customized from https://github.com/smartcontracts/simple-optimism-node
 
-A simple docker compose script for launching full / archive node for the Ink chain.
+A Docker Compose setup for running an Ink node, plus the supporting healthcheck
+and monitoring services.
 
 ## Recommended Hardware
 
 ### Mainnet
 
 - 16GB+ RAM
-- 2 TB SSD (NVME Recommended)
-- 100mb/s+ Download
+- 2 TB SSD (NVME recommended)
+- 100 Mbps+ download
 
 ### Testnet
 
 - 16GB+ RAM
-- 500 GB SSD (NVME Recommended)
-- 100mb/s+ Download
+- 500 GB SSD (NVME recommended)
+- 100 Mbps+ download
 
-## Installation and Configuration
+## Prerequisites
 
-### Install docker and docker compose
+- Docker Engine and Docker Compose v2 on Linux, or Docker Desktop on macOS and
+  Windows
+- Working L1 execution RPC and L1 beacon API endpoints for the Ethereum network
+  that matches your target Ink network
+- Enough free disk for your chosen node type
 
-> Note: If you're not logged in as root, you'll need to log out and log in again after installation to complete the docker installation.
+On Apple Silicon, the `healthcheck` sidecar runs as `linux/amd64`. Docker
+Desktop handles this automatically, but the first startup can take longer.
 
-Note: This command installs docker and docker compose for Ubuntu. For windows and mac desktop or laptop, please use Docker Desktop. For other OS, please find instructions in Google.
+### Ubuntu install
+
+> If you are not logged in as root, log out and back in after adding yourself to
+> the `docker` group.
 
 ```sh
-# Update and upgrade packages
 sudo apt-get update
 sudo apt-get upgrade -y
 
-### Docker and docker compose prerequisites
-sudo apt-get install -y curl
-sudo apt-get install -y gnupg
-sudo apt-get install -y ca-certificates
-sudo apt-get install -y lsb-release
+sudo apt-get install -y curl gnupg ca-certificates lsb-release
 
-### Download the docker gpg file to Ubuntu
 sudo mkdir -p /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 
-### Add Docker and docker compose support to the Ubuntu's packages list
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
 sudo apt-get update
-
-### Install docker and docker compose on Ubuntu
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-
 sudo usermod -aG docker $(whoami)
-
-### Verify the Docker and docker compose install on Ubuntu
-sudo docker run hello-world
 ```
 
-(For non-root user) After logged out and logged back in, test if docker is working by running.
+Verify Docker after logging back in:
 
 ```sh
 docker ps
 ```
 
-It should returns an empty container list without having any error. Otherwise, restart your machine if there are errors.
+## Quick Start
 
-### Clone the Repository
+### 1. Clone the repo
 
 ```sh
 git clone https://github.com/inkonchain/node
 cd node
 ```
 
-### Copy .env.example to .env
-
-Make a copy of `.env.example` named `.env`.
+### 2. Copy the env template
 
 ```sh
 cp .env.example .env
 ```
 
-Open `.env` with your editor of choice
+### 3. Edit `.env`
 
-### Mandatory configurations
+For the lowest-friction first run, start with `ink-sepolia` and a `full` node:
 
-- **NETWORK_NAME** - Choose which Optimism network layer you want to operate on:
-  - `ink-sepolia` - Ink Sepolia (Testnet)
-  - `ink-mainnet` - Ink (Mainnet)
-- **NODE_TYPE** - Choose the type of node you want to run:
-  - `full` (Full node) - A Full node contains a few recent blocks without historical states.
-  - `archive` (Archive node) - An Archive node stores the complete history of the blockchain, including historical states.
-- **OP_NODE\_\_RPC_ENDPOINT** - Specify the endpoint for the RPC of Layer 1 (e.g., Ethereum mainnet). For instance, you can use the free plan of Quicknode for the Ethereum mainnet.
-- **OP_NODE\_\_L1_BEACON** - Specify the beacon endpoint of Layer 1. You can use [QuickNode for the beacon endpoint](https://www.quicknode.com). For example: https://xxx-xxx-xxx.quiknode.pro/db55a3908ba7e4e5756319ffd71ec270b09a7dce
-- **OP_NODE\_\_RPC_TYPE** - Specify the service provider for the RPC endpoint you've chosen in the previous step. The available options are:
-  - `alchemy` - Alchemy
-  - `quicknode` - Quicknode (ETH only)
-  - `erigon` - Erigon
-  - `basic` - Other providers
+```sh
+NETWORK_NAME=ink-sepolia
+NODE_TYPE=full
+OP_NODE__RPC_ENDPOINT=<your Sepolia execution RPC>
+OP_NODE__L1_BEACON=<your Sepolia beacon API>
+OP_NODE__RPC_TYPE=basic
+HEALTHCHECK__REFERENCE_RPC_PROVIDER=https://rpc-gel-sepolia.inkonchain.com
+```
 
-### Optional configurations
+Configuration notes:
 
-- **OP_GETH\_\_SYNCMODE** - Specify sync mode for the execution client
-  - Unspecified - Use default snap sync for full node and full sync for archive node
-  - `snap` - Snap Sync (Default)
-  - `full` - Full Sync (For archive node, not recommended for full node)
-- **IMAGE_TAG\_\_[...]** - Use custom docker image for specified components.
-- **PORT\_\_[...]** - Use custom port for specified components.
+- `NETWORK_NAME`: `ink-sepolia` or `ink-mainnet`
+- `NODE_TYPE=full`: starts from an empty local datadir
+- `NODE_TYPE=archive`: downloads and extracts a network snapshot during
+  `bedrock-init`
+- `OP_NODE__RPC_TYPE=basic`: the right default for generic providers; use
+  `alchemy`, `quicknode`, or `erigon` only when your provider requires it
+- `.env` overrides the same variable for services that load `.env` in
+  `docker-compose.yml`, including `op-geth`, `op-node`, `healthcheck`, and
+  `bedrock-init`
+- `envs/<network>/op-node.env` already supplies the network P2P defaults, so
+  most first-time setups only need the `.env` values above
+- For `ink-mainnet`, switch the healthcheck reference RPC to
+  `https://rpc-gel.inkonchain.com`
 
-## Operating the Node
-
-### Start
+### 4. Start the stack
 
 ```sh
 docker compose up -d --build
 ```
 
-Will start the node in a detached shell (`-d`), meaning the node will continue to run in the background. We recommended to add `--build` to make sure that latest changes are being applied.
+This pulls the service images, builds the local `bedrock-init` image, creates a
+JWT, and starts:
+
+- `op-geth`
+- `op-node`
+- `healthcheck`
+- `prometheus`
+- `grafana`
+- `influxdb`
+
+## Validate Startup
+
+### Check service status
+
+```sh
+docker compose ps
+```
+
+Expect the long-running services to be `Up`. `bedrock-init` is a one-time init
+container, so it will usually disappear from default `docker compose ps` output
+once it exits. If you want to confirm it finished successfully, run
+`docker compose ps -a` and check that `bedrock-init` exited with code `0`.
+
+### Check the key logs
+
+```sh
+docker compose logs --tail 50 bedrock-init op-geth op-node
+```
+
+Good startup signals:
+
+- `bedrock-init` on first boot: `Creating JWT...` and `Creating Bedrock flag...`
+- `bedrock-init` on restart with existing volumes: `Bedrock node already initialized`
+- `op-geth`: `HTTP server started`
+- `op-node`: `Rollup node started`
+
+### Smoke test the RPC endpoints
+
+Execution RPC:
+
+```sh
+curl -fsS -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' http://127.0.0.1:9993
+```
+
+Rollup node RPC:
+
+```sh
+curl -fsS -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"rpc_modules","params":[],"id":1}' http://127.0.0.1:9545
+```
+
+Healthcheck metrics:
+
+```sh
+curl -fsS http://127.0.0.1:7300/metrics | grep -E 'healthcheck_(reference_height|target_height|height_difference)'
+```
+
+On a brand-new `full` node, `eth_blockNumber` can stay at `0x0` for a while.
+That is expected. Use `optimism_syncStatus` and the healthcheck metrics to
+confirm the node is moving forward during early sync.
+
+### Open Grafana
+
+Grafana is available at [http://localhost:3000](http://localhost:3000).
+
+- Username: `admin`
+- Password: `ink`
+
+The preloaded dashboard is `Simple Node Dashboard`.
+
+## Operating The Node
 
 ### View logs
 
 ```sh
-docker compose logs -f --tail 10
+docker compose logs -f --tail 50
 ```
 
-To view logs of all containers.
+Or for a single service:
 
 ```sh
-docker compose logs <CONTAINER_NAME> -f --tail 10
+docker compose logs -f --tail 50 op-node
 ```
-
-To view logs for a specific container. Most commonly used `<CONTAINER_NAME>` are:
-
-- op-geth
-- op-node
-- bedrock-init
 
 ### Stop
 
@@ -139,8 +196,7 @@ To view logs for a specific container. Most commonly used `<CONTAINER_NAME>` are
 docker compose down
 ```
 
-Will shut down the node without wiping any volumes.
-You can safely run this command and then restart the node again.
+This stops the stack without removing data volumes.
 
 ### Restart
 
@@ -148,11 +204,7 @@ You can safely run this command and then restart the node again.
 docker compose restart
 ```
 
-Will restart the node safely with minimal downtime but without upgrading the node.
-
 ### Upgrade
-
-Pull the latest updates from GitHub, and Docker Hub and rebuild the container.
 
 ```sh
 git pull
@@ -160,56 +212,97 @@ docker compose pull
 docker compose up -d --build
 ```
 
-Will upgrade your node with minimal downtime.
-
-### Wipe [DANGER]
+### Wipe All Data
 
 ```sh
 docker compose down -v
 ```
 
-Will shut down the node and WIPE ALL DATA. Proceed with caution!
+This removes all local chain and monitoring data.
 
 ## Monitoring
 
 ### Estimate remaining sync time
 
-Run progress.sh to estimate remaining sync time and speed.
+`progress.sh` uses Foundry's `cast` on the host machine.
 
-Uses `Cast` command from Foundry tool set. Installation instructions here: https://getfoundry.sh/.
+Install Foundry from [https://getfoundry.sh/](https://getfoundry.sh/) and then
+run:
 
 ```sh
 ./progress.sh
 ```
 
-This will show the sync speed in blocks per minute and the time until sync is completed.
+On a brand-new `full` node, `./progress.sh` can return `Error: Not syncing`
+while `eth_blockNumber` is still `0x0`. In that phase, use
+`optimism_syncStatus` and the healthcheck metrics from the validation section,
+then retry the script after the local block height starts moving.
 
-```
-Chain ID: 57073
-Please wait
-Blocks per minute: ...
-Hours until sync is completed: ...
-```
-
-### Grafana dashboard
-
-Grafana is exposed at [http://localhost:3000](http://localhost:3000) and comes with one pre-loaded dashboard ("Simple Node Dashboard").
-Simple Node Dashboard includes basic node information and will tell you if your node ever falls out of sync with the reference L2 node or if a state root fault is detected.
-
-Use the following login details to access the dashboard:
-
-- Username: `admin`
-- Password: `ink`
-
-Navigate over to `Dashboards > Manage > Simple Node Dashboard` to see the dashboard, see the following gif if you need help:
-
-![metrics dashboard gif](https://user-images.githubusercontent.com/14298799/171476634-0cb84efd-adbf-4732-9c1d-d737915e1fa7.gif)
+If you do not want to install `cast`, use the RPC and metrics checks above
+instead.
 
 ## Troubleshooting
 
-### Walking back L1Block with curr=0x0000...:0 next=0x0000...:0
+### `bedrock-init` exits quickly on a full node
 
-If you experience "walking back L1Block with curr=0x0000...:0 next=0x0000...:0" for a long time after the Ecotone upgrade, consider these fixes:
+That is expected. `full` nodes do not download a snapshot. If you want a
+snapshot restore path, switch to `NODE_TYPE=archive`.
 
-1. Wait for a few minutes. This issue usually resolves itself after some time.
-2. Restart docker compose: `docker compose down` and `docker compose up -d --build`
+### `bedrock-init` says `Bedrock node already initialized`
+
+That means the stack is reusing existing Docker volumes. This is expected on
+restarts. If you intentionally want a clean first-boot flow, wipe the volumes:
+
+```sh
+docker compose down -v
+```
+
+### `bedrock-init` takes a long time on an archive node
+
+That is expected while the snapshot is downloading and extracting. Check:
+
+```sh
+docker compose logs -f bedrock-init
+```
+
+If image pulls or snapshot downloads fail, make sure the host can reach:
+
+- `docker.io`
+- `us-docker.pkg.dev`
+- `storage.googleapis.com`
+
+### `eth_blockNumber` stays at `0x0` right after startup
+
+That is normal for a fresh `full` node. Check the rollup node instead:
+
+```sh
+curl -fsS -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"optimism_syncStatus","params":[],"id":1}' http://127.0.0.1:9545
+```
+
+### `./progress.sh` says `Error: Not syncing`
+
+That is expected during the earliest part of a fresh `full` node bootstrap. The
+script samples `eth_blockNumber` twice over 10 seconds, so it cannot estimate
+sync speed until the local execution client starts importing blocks. Use
+`optimism_syncStatus` and the healthcheck metrics first, then retry later.
+
+### `op-node` cannot connect to L1
+
+Double-check:
+
+- `OP_NODE__RPC_ENDPOINT`
+- `OP_NODE__L1_BEACON`
+- `OP_NODE__RPC_TYPE`
+
+Then restart the stack:
+
+```sh
+docker compose down
+docker compose up -d --build
+```
+
+### `Walking back L1Block` appears in the logs
+
+A few reset lines during first startup are normal. If the node keeps printing
+them without any L1 progress, verify the L1 endpoints above and restart the
+stack.
