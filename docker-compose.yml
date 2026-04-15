@@ -1,6 +1,7 @@
 services:
   healthcheck:
     image: ethereumoptimism/replica-healthcheck:${IMAGE_TAG__HEALTHCHECK:-latest}
+    platform: linux/amd64
     restart: unless-stopped
     env_file:
       - ./envs/common/healthcheck.env
@@ -18,7 +19,6 @@ services:
       - ./envs/${NETWORK_NAME}/op-geth.env
       - .env
     volumes:
-      - ./envs/${NETWORK_NAME}/config:/chainconfig
       - ./scripts/:/scripts
       - shared:/shared
       - op_geth:/geth
@@ -39,7 +39,6 @@ services:
       - ./envs/${NETWORK_NAME}/op-node.env
       - .env
     volumes:
-      - ./envs/${NETWORK_NAME}/config:/chainconfig
       - ./scripts/:/scripts
       - shared:/shared
     ports:
