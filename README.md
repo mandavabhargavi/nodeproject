@@ -88,9 +88,11 @@ HEALTHCHECK__REFERENCE_RPC_PROVIDER=https://rpc-gel-sepolia.inkonchain.com
 Configuration notes:
 
 - `NETWORK_NAME`: `ink-sepolia` or `ink-mainnet`
-- `NODE_TYPE=full`: starts from an empty local datadir
-- `NODE_TYPE=archive`: downloads and extracts a network snapshot during
-  `bedrock-init`
+- `NODE_TYPE=full`: starts from an empty local datadir. This is the validated
+  first-run path in this repo
+- `NODE_TYPE=archive`: resolves the newest archival geth datadir from the
+  Gelato ChainSnap index for your network, downloads the matching `.sha256`,
+  verifies the archive, and extracts it during `bedrock-init`
 - `OP_NODE__RPC_TYPE=basic`: the right default for generic providers; use
   `alchemy`, `quicknode`, or `erigon` only when your provider requires it
 - `.env` overrides the same variable for services that load `.env` in
@@ -98,8 +100,14 @@ Configuration notes:
   `bedrock-init`
 - `envs/<network>/op-node.env` already supplies the network P2P defaults, so
   most first-time setups only need the `.env` values above
+- `PORT__OP_NODE_P2P` changes the published host port in `docker-compose.yml`.
+  The in-container `op-node` listener still uses `9003`
 - For `ink-mainnet`, switch the healthcheck reference RPC to
   `https://rpc-gel.inkonchain.com`
+- Advanced wrapper inputs such as `OVERRIDE_HOLOCENE` and `EXTENDED_ARG` live
+  in `.env.example`. The shell entrypoints append them to both `op-geth` and
+  `op-node`, so leave them empty unless you know the flag is compatible with
+  the process you want to change
 
 ### 4. Start the stack
 
@@ -110,12 +118,17 @@ docker compose up -d --build
 This pulls the service images, builds the local `bedrock-init` image, creates a
 JWT, and starts:
 
+- `bedrock-init` (one-time init)
 - `op-geth`
 - `op-node`
 - `healthcheck`
 - `prometheus`
 - `grafana`
 - `influxdb`
+
+`op-geth` and `op-node` both wait for `bedrock-init` to create
+`/shared/initialized.txt`. If the stack looks stuck, check `bedrock-init`
+first.
 
 ## Validate Startup
 
@@ -157,6 +170,19 @@ Rollup node RPC:
 curl -fsS -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"rpc_modules","params":[],"id":1}' http://127.0.0.1:9545
 ```
 
+On `ink-sepolia`, a healthy reply includes the `optimism`, `opp2p`, and
+`health` modules.
+
+Sync status:
+
+```sh
+curl -fsS -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"optimism_syncStatus","params":[],"id":1}' http://127.0.0.1:9545
+```
+
+On a brand-new `full` node, this is the best early signal that the rollup node
+is moving forward. Look for `current_l1` and `head_l1` values to advance even
+while local L2 block height is still `0x0`.
+
 Healthcheck metrics:
 
 ```sh
@@ -164,8 +190,9 @@ curl -fsS http://127.0.0.1:7300/metrics | grep -E 'healthcheck_(reference_height
 ```
 
 On a brand-new `full` node, `eth_blockNumber` can stay at `0x0` for a while.
-That is expected. Use `optimism_syncStatus` and the healthcheck metrics to
-confirm the node is moving forward during early sync.
+That is expected. During that window it is also normal for
+`healthcheck_target_height` to stay at `0`. Use `optimism_syncStatus` and the
+healthcheck metrics to confirm the node is moving forward during early sync.
 
 ### Open Grafana
 
@@ -226,6 +253,10 @@ This removes all local chain and monitoring data.
 
 `progress.sh` uses Foundry's `cast` on the host machine.
 
+The `bedrock-init` container installs Foundry for its own image build, but that
+does not make `cast` available on your host shell. Install Foundry locally if
+you want to use `progress.sh`.
+
 Install Foundry from [https://getfoundry.sh/](https://getfoundry.sh/) and then
 run:
 
@@ -269,7 +300,26 @@ If image pulls or snapshot downloads fail, make sure the host can reach:
 
 - `docker.io`
 - `us-docker.pkg.dev`
-- `storage.googleapis.com`
+- `ink.t.snapshots.gelato.cloud`
+- `ink.snapshots.gelato.cloud`
+
+Archive snapshots are resolved from these indexes:
+
+- Sepolia: [https://ink.t.snapshots.gelato.cloud/index.html](https://ink.t.snapshots.gelato.cloud/index.html)
+- Mainnet: [https://ink.snapshots.gelato.cloud/index.html](https://ink.snapshots.gelato.cloud/index.html)
+
+`bedrock-init` downloads the matching `.sha256` file and verifies the archive
+before extraction.
+
+If `bedrock-init` exits with `Failed to resolve latest snapshot` or
+`Unexpected snapshot filename format`, the index is unreachable or its format
+changed. Switch back to `NODE_TYPE=full` and retry, or pick a direct archive
+from the index page and update the script before retrying.
+
+If `bedrock-init` exits with `Unexpected checksum file format`,
+`Checksum file does not match downloaded archive`, or `SHA256 verification
+failed`, do not reuse that download. Retry later or verify the checksum file
+from the index page before attempting another restore.
 
 ### `eth_blockNumber` stays at `0x0` right after startup
 
@@ -300,6 +350,14 @@ Then restart the stack:
 docker compose down
 docker compose up -d --build
 ```
+
+### `error dialing static peer` appears in `op-node` logs
+
+That can happen during early bootstrap if a configured static peer is
+temporarily unavailable. If `optimism_syncStatus.current_l1` keeps advancing,
+the node is still making progress. If those errors continue and `current_l1`
+stops moving, inspect `envs/<network>/op-node.env` and your outbound network
+access.
 
 ### `Walking back L1Block` appears in the logs
 
