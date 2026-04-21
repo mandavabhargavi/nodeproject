@@ -2,8 +2,41 @@
 
 > Forked and customized from https://github.com/smartcontracts/simple-optimism-node
 
-A Docker Compose setup for running an Ink node, plus the supporting healthcheck
-and monitoring services.
+A Docker Compose setup for running an Ink node on the repository's current
+`op-geth`-based stack, plus the supporting healthcheck and monitoring services.
+
+## Current Status
+
+This repository currently ships an `op-geth` execution client. The instructions
+below are the current `op-geth` runbook for this Compose stack, not the
+long-term recommendation.
+
+Per Optimism, `op-geth` support ends on May 31, 2026, and nodes still running
+it at the L1 Glamsterdam hardfork will not be able to follow the canonical
+chain. `op-node` is not being deprecated. See the
+[op-geth deprecation notice](https://docs.optimism.io/notices/op-geth-deprecation)
+and the
+[op-reth configuration guide](https://docs.optimism.io/node-operators/guides/configuration/execution-clients#op-reth-configuration).
+
+If you operate a production or long-lived node, start planning an `op-reth`
+migration now. Run it in parallel, validate it over a meaningful window, and
+prepare a fresh snapshot before the hardfork window. Treat this as an
+operator-owned migration rather than something to delay until a later
+sequencer-side client switch.
+
+This repository does not yet ship an `op-reth` Compose path. Before it can, the
+repo still needs:
+
+- a validated `op-reth` service, image, and entrypoint in `docker-compose.yml`
+- an `op-node` engine endpoint that no longer points at `http://op-geth:8551`
+- archive init and snapshot handling that can consume `op-reth` snapshots where
+  available. The checked Sepolia Ink Gelato index already exposes
+  `reth/full/datadir` artifacts, but this repo does not use them yet and the
+  checked mainnet Ink index still only exposes geth archives
+- healthcheck and monitoring updates, which still target `op-geth` and the
+  `opgeth` InfluxDB database
+- env and port naming that no longer assumes `op-geth`, such as
+  `PORT__OP_GETH_*` and `envs/*/op-geth.env`
 
 ## Recommended Hardware
 
@@ -74,7 +107,8 @@ cp .env.example .env
 
 ### 3. Edit `.env`
 
-For the lowest-friction first run, start with `ink-sepolia` and a `full` node:
+For the lowest-friction first run on the current `op-geth` stack, start with
+`ink-sepolia` and a `full` node:
 
 ```sh
 NETWORK_NAME=ink-sepolia
@@ -90,9 +124,10 @@ Configuration notes:
 - `NETWORK_NAME`: `ink-sepolia` or `ink-mainnet`
 - `NODE_TYPE=full`: starts from an empty local datadir. This is the validated
   first-run path in this repo
-- `NODE_TYPE=archive`: resolves the newest archival geth datadir from the
-  Gelato ChainSnap index for your network, downloads the matching `.sha256`,
-  verifies the archive, and extracts it during `bedrock-init`
+- `NODE_TYPE=archive`: resolves the newest archival geth datadir for the
+  current `op-geth` stack from the Gelato ChainSnap index for your network,
+  downloads the matching `.sha256`, verifies the archive, and extracts it
+  during `bedrock-init`
 - `OP_NODE__RPC_TYPE=basic`: the right default for generic providers; use
   `alchemy`, `quicknode`, or `erigon` only when your provider requires it
 - `.env` overrides the same variable for services that load `.env` in
@@ -119,7 +154,7 @@ This pulls the service images, builds the local `bedrock-init` image, creates a
 JWT, and starts:
 
 - `bedrock-init` (one-time init)
-- `op-geth`
+- `op-geth` (current execution client in this repo)
 - `op-node`
 - `healthcheck`
 - `prometheus`
@@ -158,7 +193,7 @@ Good startup signals:
 
 ### Smoke test the RPC endpoints
 
-Execution RPC:
+Execution RPC for the current `op-geth` service:
 
 ```sh
 curl -fsS -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' http://127.0.0.1:9993
@@ -303,13 +338,19 @@ If image pulls or snapshot downloads fail, make sure the host can reach:
 - `ink.t.snapshots.gelato.cloud`
 - `ink.snapshots.gelato.cloud`
 
-Archive snapshots are resolved from these indexes:
+Archive geth snapshots for the current stack are resolved from these indexes:
 
 - Sepolia: [https://ink.t.snapshots.gelato.cloud/index.html](https://ink.t.snapshots.gelato.cloud/index.html)
 - Mainnet: [https://ink.snapshots.gelato.cloud/index.html](https://ink.snapshots.gelato.cloud/index.html)
 
 `bedrock-init` downloads the matching `.sha256` file and verifies the archive
-before extraction.
+before extraction. This is still a geth datadir path, not an `op-reth`
+bootstrap flow.
+
+At the time of this docs refresh, the Sepolia Ink Gelato index also exposes
+`reth/full/datadir` artifacts, but the checked mainnet Ink index does not yet
+show `reth` artifacts. This repository does not consume those `reth` snapshots
+yet.
 
 If `bedrock-init` exits with `Failed to resolve latest snapshot` or
 `Unexpected snapshot filename format`, the index is unreachable or its format
