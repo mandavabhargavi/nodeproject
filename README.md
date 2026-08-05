@@ -307,6 +307,41 @@ then retry the script after the local block height starts moving.
 If you do not want to install `cast`, use the RPC and metrics checks above
 instead.
 
+## P2P endpoints
+
+The `op-node` bootstrap and static peers for each network are already set in
+`envs/<network>/op-node.env`, so a clean checkout needs no manual peering setup.
+
+The values below are execution-layer peers and are **not** used by the current
+stack: `op-geth` runs with `--maxpeers=0 --nodiscover`, because `op-node` runs
+`--syncmode=consensus-layer` and payloads arrive over the Engine API. They are
+recorded here as the reference for the `op-reth` migration described in
+[Current Status](#current-status).
+
+`op-reth` `--bootnodes`, both networks:
+
+```
+enode://ca2774c3c401325850b2477fd7d0f27911efbf79b1e8b335066516e2bd8c4c9e0ba9696a94b1cb030a88eac582305ff55e905e64fb77fe0edcd70a4e5296d3ec@34.65.175.185:30305?discport=30305
+enode://dd751a9ef8912be1bfa7a5e34e2c3785cc5253110bd929f385e07ba7ac19929fb0e0c5d93f77827291f4da02b2232240fbc47ea7ce04c46e333e452f8656b667@34.65.107.0:30305?discport=30305
+enode://c5d289b56a77b6a2342ca29956dfd07aadf45364dde8ab20d1dc4efd4d1bc6b4655d902501daea308f4d8950737a4e93a4dfedd17b49cd5760ffd127837ca965@34.65.202.239:30305?discport=30305
+```
+
+`op-reth` `--trusted-peers`, mainnet:
+
+```
+enode://61164c944eba34a2d4f50682fd71fa966df42ffcf32bd962810c004acf47f574efd6d0d293bd7c6ffe964524468a98f1cd9427dca2bf54dcfa375d34e5a25fc7@34.178.90.179:30304?discport=30303
+enode://3812d9e130a2f45761431935f0e2ad4a12e9389772a96e4e83e48a38722b44f02af7df32204a7a6f6fa91c38f7ba12a03178a7c6d5624dc45f87a79d076a95cb@34.6.15.128:30304?discport=30303
+enode://b708474c6db25e99320daebd2d9a8b29139a676fad976e134eb6ca6271d7525510a361efe1b0828e9288b3d33cb8edcb602d8aea335fab086ad6e38251775f91@34.178.42.30:30304?discport=30303
+```
+
+`op-reth` `--trusted-peers`, sepolia:
+
+```
+enode://9978a50acf8f7c30c8cbd657a653c2faaf4033c62c9f288a2ae88b31ac121cf5c419788d4f0b45cc5fd75d05e29bd05f59c0c5339b6726c9ea41bca4108f4bcc@34.6.8.218:30304?discport=30303
+enode://8e23c7c584b7b0808269dc74f825d68daa0df2a331c92b0c4c638b951607affa4ea614098f98791b68c73922ebbe146a5ae1e40a8d158babb372e11433091499@34.141.131.99:30304?discport=30303
+enode://c2dd4ad2f3f5dd2e3d6c77acbb4f96a73d692f3172181caf457863bd9ac0645c4b709b98e8c2fa6e6d218135268635d85224b2623480290ac4dad22f0cb31b4b@35.204.224.2:30304?discport=30303
+```
+
 ## Troubleshooting
 
 ### `bedrock-init` exits quickly on a full node
@@ -395,10 +430,11 @@ docker compose up -d --build
 ### `error dialing static peer` appears in `op-node` logs
 
 That can happen during early bootstrap if a configured static peer is
-temporarily unavailable. If `optimism_syncStatus.current_l1` keeps advancing,
-the node is still making progress. If those errors continue and `current_l1`
-stops moving, inspect `envs/<network>/op-node.env` and your outbound network
-access.
+temporarily unavailable. If those errors continue against every configured peer,
+inspect `envs/<network>/op-node.env` and your outbound network access; stale peer
+endpoints are the usual cause. Note that `current_l1` can keep advancing with
+zero peers, since the node still derives the safe chain from L1 — check
+`opp2p_peerStats.connected` to confirm P2P health.
 
 ### `Walking back L1Block` appears in the logs
 
